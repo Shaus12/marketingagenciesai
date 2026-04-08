@@ -1,5 +1,5 @@
 """
-Telegram notification system for BuildLoop Ads.
+Telegram notification system for YourBrand Ads.
 
 Sends performance updates, AI analyst briefings, alerts,
 and strategic recommendations directly to Telegram.
@@ -65,7 +65,7 @@ def send_performance_update(dashboard: Dict[str, Any]) -> bool:
     status_emoji = {"healthy": "🟢", "needs_attention": "🟡", "critical": "🔴", "no_data": "⚪"}.get(status, "❓")
 
     text = (
-        f"{status_emoji} *BuildLoop Ads Update*\n\n"
+        f"{status_emoji} *YourBrand Ads Update*\n\n"
         f"*Today*\n"
         f"  Spend: €{spend_today:.2f}\n"
         f"  Conversions: {conv_today}\n"

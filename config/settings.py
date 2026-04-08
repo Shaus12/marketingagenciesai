@@ -37,7 +37,7 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ads.db")
 
 # --- Business Targets (FILL THESE IN) ---
-# BuildLoop.ai — AI product building platform
+# YourBrand.ai — AI product building platform
 # Products: Free Webinar → Box (€297) → Pro Program (€497-997) → 1-on-1 (€2K-5K)
 TARGET_CPA = float(os.getenv("TARGET_CPA", "50.0"))        # Max cost per acquisition (Pro sale)
 TARGET_CPL = float(os.getenv("TARGET_CPL", "5.0"))          # Max cost per webinar lead
@@ -50,7 +50,7 @@ SCALE_BUDGET_PCT = 0.70    # Proven winners
 ITERATE_BUDGET_PCT = 0.20  # Adjacent variations
 TEST_BUDGET_PCT = 0.10     # Wild new concepts
 
-# --- Supabase Table Mapping (BuildLoop) ---
+# --- Supabase Table Mapping (YourBrand) ---
 SUPABASE_TABLES = {
     # Community content
     "posts": os.getenv("SUPABASE_TABLE_POSTS", "community_posts"),

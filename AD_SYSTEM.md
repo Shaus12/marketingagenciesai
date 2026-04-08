@@ -229,16 +229,16 @@ Live demo included. 60 minutes.
 
 | Campaign | ID | Purpose |
 |----------|-----|---------|
-| Scale | `120242853738070500` | Proven winners at higher budget |
-| Iterate | `120242853723440500` | Variations of what works |
-| Test | `120242853724590500` | New creative concepts |
-| Retarget | `120242853738530500` | Website visitors, video viewers |
+| Scale | `YOUR_CAMPAIGN_OR_ADSET_ID` | Proven winners at higher budget |
+| Iterate | `YOUR_CAMPAIGN_OR_ADSET_ID` | Variations of what works |
+| Test | `YOUR_CAMPAIGN_OR_ADSET_ID` | New creative concepts |
+| Retarget | `YOUR_CAMPAIGN_OR_ADSET_ID` | Website visitors, video viewers |
 
 | Ad Set | ID | Purpose |
 |--------|-----|---------|
-| Scale Main | `120243085062480500` | Primary scaling ad set |
-| Test Main | `120243073067150500` | Testing new creatives |
-| Retarget Website | `120243073067450500` | Website visitor retargeting |
+| Scale Main | `YOUR_CAMPAIGN_OR_ADSET_ID` | Primary scaling ad set |
+| Test Main | `YOUR_CAMPAIGN_OR_ADSET_ID` | Testing new creatives |
+| Retarget Website | `YOUR_CAMPAIGN_OR_ADSET_ID` | Website visitor retargeting |
 
 ### Standard Flow for New Ads
 1. Generate images using brand template

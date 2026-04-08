@@ -41,7 +41,7 @@ _SEVERITY_LABELS: Dict[str, str] = {
 
 
 def _base_template(title: str, body_html: str, preheader: str = "") -> str:
-    """Wrap *body_html* in the BuildLoop dark-themed email template.
+    """Wrap *body_html* in the YourBrand dark-themed email template.
 
     Args:
         title: Displayed as the main heading inside the email.
@@ -82,7 +82,7 @@ def _base_template(title: str, body_html: str, preheader: str = "") -> str:
               <tr>
                 <td>
                   <span style="font-size:22px;font-weight:700;color:#FFFFFF;letter-spacing:-0.3px;">
-                    BuildLoop
+                    YourBrand
                   </span>
                   <span style="font-size:22px;font-weight:300;color:rgba(255,255,255,0.85);letter-spacing:-0.3px;">
                     .ai
@@ -113,7 +113,7 @@ def _base_template(title: str, body_html: str, preheader: str = "") -> str:
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td style="color:#64748B;font-size:12px;line-height:1.5;">
-                  Sent by <strong style="color:#A855F7;">BuildLoop.ai</strong>
+                  Sent by <strong style="color:#A855F7;">YourBrand.ai</strong>
                   Meta Ads Management System<br>
                   {datetime.now().strftime("%B %d, %Y at %H:%M")}
                 </td>
@@ -440,14 +440,14 @@ class EmailNotifier:
         Returns:
             ``True`` if the email was sent successfully.
         """
-        subject = f"Welcome to BuildLoop, {name}!"
+        subject = f"Welcome to YourBrand, {name}!"
 
         inner = (
             f'<h2 style="color:#FFFFFF;font-size:20px;margin:0 0 20px;">'
             f"Hey {_escape_html(name)}, welcome aboard!</h2>"
             f'<p style="color:#E2E8F0;font-size:15px;line-height:1.7;'
             f'margin:0 0 16px;">'
-            f"We are thrilled to have you join the BuildLoop community. "
+            f"We are thrilled to have you join the YourBrand community. "
             f"You have just taken the first step toward building something "
             f"amazing with AI.</p>"
             f'<div style="background-color:#0F1117;border:1px solid #2A2D3A;'
@@ -476,7 +476,7 @@ class EmailNotifier:
         html_body = _base_template(
             title=f"Welcome, {name}!",
             body_html=inner,
-            preheader=f"Welcome to BuildLoop, {name}! Let's build something great together.",
+            preheader=f"Welcome to YourBrand, {name}! Let's build something great together.",
         )
         return self.send_email(subject, html_body, html=True, to=to)
 
@@ -510,7 +510,7 @@ class EmailNotifier:
             f'<p style="color:#E2E8F0;font-size:15px;line-height:1.7;'
             f'margin:0 0 20px;">'
             f"We have something special for you. Based on your journey with "
-            f"BuildLoop, we think you will love this:</p>"
+            f"YourBrand, we think you will love this:</p>"
             f'<div style="background:linear-gradient(135deg,rgba(108,92,231,0.15),'
             f"rgba(168,85,247,0.15));border:1px solid #6C5CE7;"
             f'border-radius:12px;padding:28px;margin:20px 0;text-align:center;">'
