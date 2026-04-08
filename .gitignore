@@ -1,0 +1,17 @@
+.env
+config/drive_token.json
+config/oauth_credentials.json
+config/*.json
+!config/rules.py
+!config/settings.py
+!config/hormozi.py
+data/ads.db*
+data/*.json
+!data/db.py
+!data/models.py
+!data/supabase_*.sql
+creative/generated/
+creative/video_ads/
+__pycache__/
+*.pyc
+.DS_Store
