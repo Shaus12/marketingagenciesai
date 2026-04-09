@@ -1,9 +1,10 @@
 name: Sync Meta Ads → Supabase
 
 on:
-  schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+  # Uncomment the schedule below after adding your secrets
+  # schedule:
+  #   - cron: '0 * * * *'  # Every hour
+  workflow_dispatch:  # Manual trigger only (until secrets are configured)
 
 jobs:
   sync:
