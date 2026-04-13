@@ -14,13 +14,22 @@ META_APP_ID = os.getenv("META_APP_ID", "")
 META_APP_SECRET = os.getenv("META_APP_SECRET", "")
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 META_AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID", "")  # format: act_123456
+META_PAGE_ID = os.getenv("META_PAGE_ID", "")
+META_PAGE_ACCESS_TOKEN = os.getenv("META_PAGE_ACCESS_TOKEN", "")
 
 # --- Supabase ---
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
-# --- Anthropic ---
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# --- Kie.ai ---
+KIE_AI_API_KEY = os.getenv("KIE_AI_API_KEY", "")
+
+# --- Telegram ---
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# --- Echoes App ---
+ECHOES_FB_APP_ID = os.getenv("ECHOES_FB_APP_ID", "")
 
 # --- Slack ---
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")

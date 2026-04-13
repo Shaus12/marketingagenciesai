@@ -608,17 +608,17 @@ class CopyGenerator:
     # ------------------------------------------------------------------
 
     def _get_ai_client(self):
-        """Return an Anthropic client or None if unavailable."""
+        """Return a Kie.ai client or None if unavailable."""
         try:
-            import anthropic
-            from config.settings import ANTHROPIC_API_KEY
+            from openai import OpenAI
+            from config.settings import KIE_AI_API_KEY
         except ImportError:
-            logger.warning("anthropic package not installed")
+            logger.warning("openai package not installed")
             return None
-        if not ANTHROPIC_API_KEY:
-            logger.warning("ANTHROPIC_API_KEY not set")
+        if not KIE_AI_API_KEY:
+            logger.warning("KIE_AI_API_KEY not set")
             return None
-        return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        return OpenAI(api_key=KIE_AI_API_KEY, base_url="https://api.kie.ai/api/v1")
 
     def _ai_system_prompt(self) -> str:
         """Standard system prompt for copy generation."""
@@ -665,15 +665,16 @@ class CopyGenerator:
         )
 
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            response = client.chat.completions.create(
+                model="claude-sonnet-4-5",
                 max_tokens=1024,
-                system=self._ai_system_prompt(),
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=[
+                    {"role": "system", "content": self._ai_system_prompt()},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
             import json
-            block = response.content[0]
-            text = block.text if hasattr(block, "text") else str(block)
+            text = response.choices[0].message.content or ""
             start = text.find("{")
             end = text.rfind("}") + 1
             if start >= 0 and end > start:
@@ -690,20 +691,22 @@ class CopyGenerator:
             return self.generate_headline(angle, style)
 
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            response = client.chat.completions.create(
+                model="claude-sonnet-4-5",
                 max_tokens=128,
-                system=self._ai_system_prompt(),
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Write one short ad headline for: {angle}\n"
-                        f"Style: {style}\n"
-                        f"Max 10 words. Return ONLY the headline text."
-                    ),
-                }],
+                messages=[
+                    {"role": "system", "content": self._ai_system_prompt()},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Write one short ad headline for: {angle}\n"
+                            f"Style: {style}\n"
+                            f"Max 10 words. Return ONLY the headline text."
+                        ),
+                    },
+                ],
             )
-            return (response.content[0].text if hasattr(response.content[0], "text") else str(response.content[0])).strip().strip('"')
+            return (response.choices[0].message.content or "").strip().strip('"')
         except Exception:
             logger.exception("AI headline generation failed")
 
@@ -719,19 +722,21 @@ class CopyGenerator:
 
         extra = f"\nProof to include: {proof}" if proof else ""
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            response = client.chat.completions.create(
+                model="claude-sonnet-4-5",
                 max_tokens=512,
-                system=self._ai_system_prompt(),
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Write ad body copy for: {angle}{extra}\n"
-                        f"Max {max_words} words. Return ONLY the body text."
-                    ),
-                }],
+                messages=[
+                    {"role": "system", "content": self._ai_system_prompt()},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Write ad body copy for: {angle}{extra}\n"
+                            f"Max {max_words} words. Return ONLY the body text."
+                        ),
+                    },
+                ],
             )
-            return (response.content[0].text if hasattr(response.content[0], "text") else str(response.content[0])).strip()
+            return (response.choices[0].message.content or "").strip()
         except Exception:
             logger.exception("AI body generation failed")
 
@@ -744,21 +749,23 @@ class CopyGenerator:
             return self.generate_variations(base_copy, count)
 
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            response = client.chat.completions.create(
+                model="claude-sonnet-4-5",
                 max_tokens=1024,
-                system=self._ai_system_prompt(),
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Create {count} variations of this ad copy:\n\n{base_copy}\n\n"
-                        f"Keep the same message. Change the wording and structure.\n"
-                        f"Return ONLY a JSON array of strings."
-                    ),
-                }],
+                messages=[
+                    {"role": "system", "content": self._ai_system_prompt()},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Create {count} variations of this ad copy:\n\n{base_copy}\n\n"
+                            f"Keep the same message. Change the wording and structure.\n"
+                            f"Return ONLY a JSON array of strings."
+                        ),
+                    },
+                ],
             )
             import json
-            text = (response.content[0].text if hasattr(response.content[0], "text") else str(response.content[0]))
+            text = response.choices[0].message.content or ""
             start = text.find("[")
             end = text.rfind("]") + 1
             if start >= 0 and end > start:

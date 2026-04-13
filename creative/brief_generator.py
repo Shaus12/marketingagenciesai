@@ -568,14 +568,14 @@ class BriefGenerator:
     ) -> Dict[str, Any]:
         """Use Claude to generate a richer creative brief."""
         try:
-            import anthropic
-            from config.settings import ANTHROPIC_API_KEY
+            from openai import OpenAI
+            from config.settings import KIE_AI_API_KEY
         except ImportError:
-            logger.warning("anthropic package not installed — falling back to templates")
+            logger.warning("openai package not installed — falling back to templates")
             return self.generate_brief(performance_data, community_pulse)
 
-        if not ANTHROPIC_API_KEY:
-            logger.warning("ANTHROPIC_API_KEY not set — falling back to templates")
+        if not KIE_AI_API_KEY:
+            logger.warning("KIE_AI_API_KEY not set — falling back to templates")
             return self.generate_brief(performance_data, community_pulse)
 
         import json
@@ -626,16 +626,17 @@ class BriefGenerator:
             "Return ONLY a JSON object with the keys above."
         )
 
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = OpenAI(api_key=KIE_AI_API_KEY, base_url="https://api.kie.ai/api/v1")
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            response = client.chat.completions.create(
+                model="claude-sonnet-4-5",
                 max_tokens=3000,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
-            block = response.content[0]
-            text = block.text if hasattr(block, "text") else str(block)
+            text = response.choices[0].message.content or ""
             start = text.find("{")
             end = text.rfind("}") + 1
             if start >= 0 and end > start:

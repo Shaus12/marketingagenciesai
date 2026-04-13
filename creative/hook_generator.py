@@ -343,16 +343,16 @@ class HookGenerator:
     def _generate_hooks_ai(
         self, prompt_context: str, count: int
     ) -> List[Dict[str, Any]]:
-        """Use the Anthropic API to generate high-quality hooks."""
+        """Use the Kie.ai API to generate high-quality hooks."""
         try:
-            import anthropic
-            from config.settings import ANTHROPIC_API_KEY
+            from openai import OpenAI
+            from config.settings import KIE_AI_API_KEY
         except ImportError:
-            logger.warning("anthropic package not installed — falling back to templates")
+            logger.warning("openai package not installed — falling back to templates")
             return self.generate_hooks(prompt_context, count)
 
-        if not ANTHROPIC_API_KEY:
-            logger.warning("ANTHROPIC_API_KEY not set — falling back to templates")
+        if not KIE_AI_API_KEY:
+            logger.warning("KIE_AI_API_KEY not set — falling back to templates")
             return self.generate_hooks(prompt_context, count)
 
         categories_desc = "\n".join(
@@ -377,17 +377,18 @@ class HookGenerator:
             f"Set source to \"ai_generated\" for all."
         )
 
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = OpenAI(api_key=KIE_AI_API_KEY, base_url="https://api.kie.ai/api/v1")
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            response = client.chat.completions.create(
+                model="claude-sonnet-4-5",
                 max_tokens=2048,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
             import json
-            block = response.content[0]
-            text = block.text if hasattr(block, "text") else str(block)
+            text = response.choices[0].message.content or ""
             # Extract JSON array from response
             start = text.find("[")
             end = text.rfind("]") + 1

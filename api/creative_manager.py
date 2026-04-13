@@ -7,7 +7,7 @@ All uploads and creative creation are logged for audit trail.
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Optional
 
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.adcreative import AdCreative
@@ -15,8 +15,9 @@ from facebook_business.adobjects.adimage import AdImage
 from facebook_business.adobjects.advideo import AdVideo
 from facebook_business.exceptions import FacebookRequestError
 
+from facebook_business.api import FacebookAdsApi
 from api.meta_client import MetaClient
-from config.settings import META_AD_ACCOUNT_ID
+from config.settings import META_AD_ACCOUNT_ID, META_PAGE_ID, META_PAGE_ACCESS_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -198,11 +199,11 @@ def create_creative(
     body: str,
     title: str,
     link_url: str,
-    image_hash: str | None = None,
-    video_id: str | None = None,
-    call_to_action: str | None = None,
-    page_id: str | None = None,
-    description: str | None = None,
+    image_hash: Optional[str] = None,
+    video_id: Optional[str] = None,
+    call_to_action: Optional[str] = None,
+    page_id: Optional[str] = None,
+    description: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create an AdCreative with the given assets and copy.
 
@@ -244,12 +245,19 @@ def create_creative(
     account = client.get_account()
 
     if page_id is None:
-        page_id = os.environ.get("META_PAGE_ID", "")
+        page_id = META_PAGE_ID
         if not page_id:
             logger.warning(
                 "No page_id provided and META_PAGE_ID env var is empty. "
                 "Creative creation may fail."
             )
+
+    # Use the Page Access Token for creative creation so that the API
+    # recognises this app as authorised to publish on behalf of the page,
+    # even without the pages_manage_ads user-level permission.
+    if META_PAGE_ACCESS_TOKEN:
+        FacebookAdsApi.init(access_token=META_PAGE_ACCESS_TOKEN)
+        account = AdAccount(META_AD_ACCOUNT_ID)
 
     cta_type = call_to_action or "LEARN_MORE"
 
@@ -348,7 +356,7 @@ def create_creative(
 
 
 def list_creatives(
-    campaign_id: str | None = None,
+    campaign_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """List creatives with their metadata.
 
