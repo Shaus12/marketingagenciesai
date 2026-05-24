@@ -1,13 +1,13 @@
 """
-Telegram bot for Echoes Ads — powered by Claude via Kie.ai.
+Telegram bot for managing Meta Ads — powered by Claude.
 
-You can chat naturally, ask about performance, and control campaigns.
+Chat naturally, ask about performance, and control campaigns from Telegram.
 
 Built-in commands:
   /stats    — today's campaign stats
   /week     — last 7 days summary
   /pause    — pause all active campaigns
-  /activate — activate the Echoes App Installs campaign
+  /activate — activate campaigns
   /help     — show available commands
 
 Usage:
@@ -32,29 +32,56 @@ from facebook_business.exceptions import FacebookRequestError
 
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────
-TELEGRAM_TOKEN  = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT   = os.getenv("TELEGRAM_CHAT_ID", "")
-KIE_API_KEY     = os.getenv("KIE_AI_API_KEY", "")
-AD_ACCOUNT_ID   = os.getenv("META_AD_ACCOUNT_ID", "")
-APP_INSTALLS_CAMPAIGN = "120244634251700200"
+# -- Config (all from environment / client_config.yaml) --------------------
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
+KIE_API_KEY = os.getenv("KIE_AI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID", "")
 
-SYSTEM_PROMPT = """You are an AI ads assistant managing Facebook/Meta campaigns for the iOS app "Echoes: Numerology Map" — a numerology self-discovery app.
 
-You help the user monitor performance, understand metrics, and make decisions about their ad campaigns. Be concise, direct, and use plain language. Use emojis sparingly.
+def _load_client_config() -> dict:
+    """Load client_config.yaml for business context."""
+    try:
+        import yaml
+        from pathlib import Path
+        config_path = Path(__file__).resolve().parent.parent / "client_config.yaml"
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text()) or {}
+    except Exception:
+        pass
+    return {}
 
-Key facts about the setup:
-- Campaign: "Echoes: Numerology Map — App Installs" (OUTCOME_APP_PROMOTION)
-- Budget: 20 ILS/day
-- Target: iOS users in IL, US, GB, AU, CA — ages 18+
-- 2 active ads: "Cosmic Map" (purple cosmic image) and "Hook Text" (image with text overlay)
-- Goal: cheap app installs (target CPI under 15 ILS)
+
+_CLIENT_CONFIG = _load_client_config()
+_BIZ_NAME = _CLIENT_CONFIG.get("business", {}).get("name", "your business")
+_CURRENCY = _CLIENT_CONFIG.get("targets", {}).get("currency", "USD")
+_CURRENCY_SYM = {"USD": "$", "EUR": "\u20ac", "GBP": "\u00a3", "ILS": "\u20aa"}.get(_CURRENCY, _CURRENCY + " ")
+_MONTHLY_BUDGET = _CLIENT_CONFIG.get("targets", {}).get("monthly_budget", 0)
+_TARGET_CPL = _CLIENT_CONFIG.get("targets", {}).get("cpl", 5.0)
+_TARGET_ROAS = _CLIENT_CONFIG.get("targets", {}).get("target_roas", 4.0)
+_FUNNEL_TYPE = _CLIENT_CONFIG.get("funnel", {}).get("type", "")
+_LANDING_URL = _CLIENT_CONFIG.get("funnel", {}).get("landing_page_url", "")
+
+SYSTEM_PROMPT = f"""You are an AI ads assistant managing Meta (Facebook/Instagram) campaigns for "{_BIZ_NAME}".
+
+You help the user monitor performance, understand metrics, and make decisions about their ad campaigns. Be concise, direct, and use plain language.
+
+Key facts:
+- Business: {_BIZ_NAME}
+- Currency: {_CURRENCY}
+- Monthly budget: {_CURRENCY_SYM}{_MONTHLY_BUDGET:,.0f}
+- Target CPL: {_CURRENCY_SYM}{_TARGET_CPL}
+- Target ROAS: {_TARGET_ROAS}x
+- Funnel: {_FUNNEL_TYPE}
+- Landing page: {_LANDING_URL}
 
 When asked about metrics, remind the user they can type /stats for live numbers.
 When asked to pause or activate, remind them they can use /pause or /activate commands.
 Keep answers under 200 words unless the user asks for detail."""
 
-# ── Telegram helpers ──────────────────────────────────────────────────────
+
+# -- Telegram helpers ------------------------------------------------------
 
 def send(chat_id: str, text: str) -> None:
     requests.post(
@@ -76,7 +103,7 @@ def get_updates(offset: int) -> list:
         return []
 
 
-# ── Meta helpers ──────────────────────────────────────────────────────────
+# -- Meta helpers ----------------------------------------------------------
 
 def _init_meta():
     FacebookAdsApi.init(
@@ -86,32 +113,156 @@ def _init_meta():
     )
 
 
+def _get_active_campaigns() -> list:
+    """Get all active campaigns from the ad account."""
+    _init_meta()
+    account = AdAccount(AD_ACCOUNT_ID)
+    campaigns = account.get_campaigns(
+        fields=["id", "name", "status", "daily_budget"],
+        params={"effective_status": ["ACTIVE"]},
+    )
+    return [dict(c) for c in campaigns]
+
+
 def get_today_stats() -> str:
-    from scripts.daily_report import fetch_campaign_insights, format_report
-    stats = fetch_campaign_insights(APP_INSTALLS_CAMPAIGN, days=1)
-    return format_report(stats)
+    """Fetch today's stats for all active campaigns."""
+    _init_meta()
+    from datetime import date, timedelta
+    account = AdAccount(AD_ACCOUNT_ID)
+    today = date.today()
+
+    try:
+        insights = account.get_insights(params={
+            "time_range": {"since": str(today), "until": str(today)},
+            "fields": [
+                "spend", "impressions", "clicks", "ctr", "cpm",
+                "actions", "cost_per_action_type",
+            ],
+            "level": "account",
+        })
+        rows = list(insights)
+        if not rows:
+            return f"No data yet today for {_BIZ_NAME}."
+
+        row = dict(rows[0])
+        spend = float(row.get("spend", 0))
+        impressions = int(row.get("impressions", 0))
+        clicks = int(row.get("clicks", 0))
+        ctr = float(row.get("ctr", 0))
+
+        # Extract conversions
+        conversions = 0
+        cpa = 0.0
+        for action in row.get("actions", []):
+            if action.get("action_type") in ("lead", "offsite_conversion.fb_pixel_purchase", "mobile_app_install", "app_install"):
+                conversions += int(action.get("value", 0))
+        for cost in row.get("cost_per_action_type", []):
+            if cost.get("action_type") in ("lead", "offsite_conversion.fb_pixel_purchase", "mobile_app_install", "app_install"):
+                cpa = float(cost.get("value", 0))
+
+        lines = [
+            f"*{_BIZ_NAME} — Today*",
+            f"_{today}_\n",
+            f"Spend: {_CURRENCY_SYM}{spend:.2f}",
+            f"Impressions: {impressions:,}",
+            f"Clicks: {clicks:,} ({ctr:.2f}% CTR)",
+            f"Conversions: {conversions}",
+            f"CPA: {_CURRENCY_SYM}{cpa:.2f}" if cpa > 0 else "CPA: --",
+        ]
+
+        if conversions > 0 and cpa > 0:
+            if cpa <= _TARGET_CPL:
+                lines.append(f"\nBelow target ({_CURRENCY_SYM}{_TARGET_CPL}) — looking good.")
+            else:
+                lines.append(f"\nAbove target ({_CURRENCY_SYM}{_TARGET_CPL}) — monitor closely.")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error fetching stats: {e}"
 
 
 def get_week_stats() -> str:
-    from scripts.daily_report import fetch_campaign_insights, format_report
-    stats = fetch_campaign_insights(APP_INSTALLS_CAMPAIGN, days=7)
-    return format_report(stats)
+    """Fetch last 7 days stats."""
+    _init_meta()
+    from datetime import date, timedelta
+    account = AdAccount(AD_ACCOUNT_ID)
+    end = date.today()
+    start = end - timedelta(days=6)
+
+    try:
+        insights = account.get_insights(params={
+            "time_range": {"since": str(start), "until": str(end)},
+            "fields": [
+                "spend", "impressions", "clicks", "ctr",
+                "actions", "cost_per_action_type",
+            ],
+            "level": "account",
+        })
+        rows = list(insights)
+        if not rows:
+            return "No data for the last 7 days."
+
+        row = dict(rows[0])
+        spend = float(row.get("spend", 0))
+        impressions = int(row.get("impressions", 0))
+        clicks = int(row.get("clicks", 0))
+        ctr = float(row.get("ctr", 0))
+
+        conversions = 0
+        cpa = 0.0
+        for action in row.get("actions", []):
+            if action.get("action_type") in ("lead", "offsite_conversion.fb_pixel_purchase", "mobile_app_install", "app_install"):
+                conversions += int(action.get("value", 0))
+        if conversions > 0 and spend > 0:
+            cpa = spend / conversions
+
+        lines = [
+            f"*{_BIZ_NAME} — Last 7 Days*",
+            f"_{start} to {end}_\n",
+            f"Spend: {_CURRENCY_SYM}{spend:.2f}",
+            f"Impressions: {impressions:,}",
+            f"Clicks: {clicks:,} ({ctr:.2f}% CTR)",
+            f"Conversions: {conversions}",
+            f"Avg CPA: {_CURRENCY_SYM}{cpa:.2f}" if cpa > 0 else "CPA: --",
+            f"Daily avg: {_CURRENCY_SYM}{spend / 7:.2f}/day",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error fetching weekly stats: {e}"
 
 
 def set_campaign_status(status: str) -> str:
+    """Pause or activate ALL campaigns in the account."""
     _init_meta()
     try:
-        campaign = Campaign(APP_INSTALLS_CAMPAIGN)
-        campaign.api_update(params={"status": status})
-        label = "▶️ activated" if status == "ACTIVE" else "⏸ paused"
-        return f"Campaign {label} successfully."
-    except FacebookRequestError as e:
-        return f"Error: {e.api_error_message()}"
+        account = AdAccount(AD_ACCOUNT_ID)
+        target_status = ["ACTIVE"] if status == "PAUSED" else ["PAUSED"]
+        campaigns = account.get_campaigns(
+            fields=["id", "name"],
+            params={"effective_status": target_status},
+        )
+        changed = []
+        for c in campaigns:
+            try:
+                campaign = Campaign(c["id"])
+                campaign.api_update(params={"status": status})
+                changed.append(c.get("name", c["id"]))
+            except FacebookRequestError as e:
+                logger.error("Failed to update %s: %s", c["id"], e.api_error_message())
+
+        if not changed:
+            label = "active" if status == "PAUSED" else "paused"
+            return f"No {label} campaigns to change."
+
+        action = "Paused" if status == "PAUSED" else "Activated"
+        names = "\n".join(f"  - {n}" for n in changed)
+        return f"{action} {len(changed)} campaign(s):\n{names}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
-# ── Claude via Kie.ai ─────────────────────────────────────────────────────
+# -- AI chat (Claude via Anthropic or Kie.ai) ------------------------------
 
-# Conversation history per chat (in-memory, resets on bot restart)
 _history: dict[str, list] = {}
 
 
@@ -120,52 +271,51 @@ def ask_claude(chat_id: str, user_message: str) -> str:
         _history[chat_id] = []
 
     _history[chat_id].append({"role": "user", "content": user_message})
-
-    # Keep last 20 messages to avoid token overflow
     messages = _history[chat_id][-20:]
 
+    # Try Anthropic SDK first, then Kie.ai fallback
     try:
-        # Prepend system prompt as first message if history is fresh
-        full_messages = [{"role": "user", "content": f"[SYSTEM CONTEXT]\n{SYSTEM_PROMPT}\n[END CONTEXT]\n\nUser: {messages[0]['content']}"}] + messages[1:] if len(messages) == 1 else messages
-
-        r = requests.post(
-            "https://api.kie.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {KIE_API_KEY}",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-5",
-                "max_tokens": 512,
-                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-            },
-            timeout=30,
-        )
-        data = r.json()
-
-        if "choices" in data and data["choices"]:
-            reply = data["choices"][0].get("message", {}).get("content", "")
-        elif "error" in data:
-            reply = f"AI error: {data['error'].get('message', 'unknown')}"
+        if ANTHROPIC_API_KEY:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            resp = client.messages.create(
+                model="claude-sonnet-4-5-20250514",
+                max_tokens=512,
+                system=SYSTEM_PROMPT,
+                messages=messages,
+            )
+            reply = resp.content[0].text
+        elif KIE_API_KEY:
+            r = requests.post(
+                "https://api.kie.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {KIE_API_KEY}", "content-type": "application/json"},
+                json={"model": "claude-sonnet-4-5", "max_tokens": 512,
+                      "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages},
+                timeout=30,
+            )
+            data = r.json()
+            if "choices" in data and data["choices"]:
+                reply = data["choices"][0].get("message", {}).get("content", "")
+            else:
+                reply = f"AI error: {data.get('error', {}).get('message', 'unknown')}"
         else:
-            reply = "Sorry, I didn't get a response. Try again."
+            reply = "No AI API key configured. Set ANTHROPIC_API_KEY or KIE_AI_API_KEY in your .env file."
 
         _history[chat_id].append({"role": "assistant", "content": reply})
         return reply
-
     except Exception as e:
-        return f"Connection error: {e}"
+        return f"AI error: {e}"
 
 
-# ── Command handler ───────────────────────────────────────────────────────
+# -- Command handler ------------------------------------------------------
 
-HELP_TEXT = """*Echoes Ads Bot* 🤖
+HELP_TEXT = f"""*{_BIZ_NAME} Ads Bot*
 
 *Commands:*
 /stats — today's performance
 /week — last 7 days
-/activate — turn campaign ON
-/pause — turn campaign OFF
+/activate — turn campaigns ON
+/pause — turn campaigns OFF
 /help — this message
 
 Or just *chat naturally* — ask me anything about your ads, results, or strategy."""
@@ -185,20 +335,21 @@ def handle_message(chat_id: str, text: str) -> None:
     elif text.startswith("/start") or text.startswith("/help"):
         send(chat_id, HELP_TEXT)
     else:
-        # Route to Claude
         reply = ask_claude(chat_id, text)
         send(chat_id, reply)
 
 
-# ── Main loop ─────────────────────────────────────────────────────────────
+# -- Main loop ------------------------------------------------------------
 
 def run():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
-    logger.info("Bot starting — polling for messages...")
-    send(TELEGRAM_CHAT, "🤖 Echoes Ads Bot is online. Type /help to see what I can do.")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+    if not TELEGRAM_TOKEN:
+        print("Error: TELEGRAM_BOT_TOKEN not set. Run the setup wizard first.")
+        sys.exit(1)
+
+    logger.info("Bot starting for %s — polling for messages...", _BIZ_NAME)
+    send(TELEGRAM_CHAT, f"*{_BIZ_NAME} Ads Bot* is online. Type /help to see what I can do.")
 
     offset = 0
     while True:
@@ -212,8 +363,7 @@ def run():
             if not chat_id or not text:
                 continue
 
-            # Only respond to the configured chat
-            if chat_id != TELEGRAM_CHAT:
+            if TELEGRAM_CHAT and chat_id != TELEGRAM_CHAT:
                 logger.warning("Ignoring message from unknown chat %s", chat_id)
                 continue
 

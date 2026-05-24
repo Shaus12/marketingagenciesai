@@ -1,6 +1,5 @@
 """
-Daily performance report for Echoes: Numerology Map ads.
-Fetches Meta campaign insights and sends a formatted Telegram message.
+Daily performance report — fetches Meta insights and sends to Telegram.
 
 Usage:
     python -m scripts.daily_report          # today's stats
@@ -17,21 +16,39 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from facebook_business.api import FacebookAdsApi
-from facebook_business.adobjects.campaign import Campaign
 from facebook_business.adobjects.adaccount import AdAccount
 
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────
+# -- Config ----------------------------------------------------------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT   = os.getenv("TELEGRAM_CHAT_ID", "")
-AD_ACCOUNT_ID   = os.getenv("META_AD_ACCOUNT_ID", "")
-APP_INSTALLS_CAMPAIGN = "120244634251700200"
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
+AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID", "")
 
 
-# ── Telegram helper ───────────────────────────────────────────────────────
+def _load_client_config() -> dict:
+    try:
+        import yaml
+        from pathlib import Path
+        config_path = Path(__file__).resolve().parent.parent / "client_config.yaml"
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text()) or {}
+    except Exception:
+        pass
+    return {}
+
+
+_CONFIG = _load_client_config()
+_BIZ_NAME = _CONFIG.get("business", {}).get("name", "Meta Ads")
+_CURRENCY = _CONFIG.get("targets", {}).get("currency", "USD")
+_SYM = {"USD": "$", "EUR": "\u20ac", "GBP": "\u00a3", "ILS": "\u20aa"}.get(_CURRENCY, _CURRENCY + " ")
+_TARGET_CPL = _CONFIG.get("targets", {}).get("cpl", 5.0)
+
+
+# -- Telegram --------------------------------------------------------------
 
 def send_telegram(text: str) -> bool:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
@@ -45,7 +62,7 @@ def send_telegram(text: str) -> bool:
     return r.json().get("ok", False)
 
 
-# ── Meta insights ─────────────────────────────────────────────────────────
+# -- Meta insights ---------------------------------------------------------
 
 def _init_meta():
     FacebookAdsApi.init(
@@ -55,25 +72,20 @@ def _init_meta():
     )
 
 
-def fetch_campaign_insights(campaign_id: str, days: int = 1) -> dict:
+def fetch_campaign_insights(campaign_id: str = None, days: int = 1) -> dict:
+    """Fetch account-level insights. If campaign_id given, fetch for that campaign."""
     _init_meta()
-    end   = date.today()
+    end = date.today()
     start = end - timedelta(days=days - 1)
 
-    campaign = Campaign(campaign_id)
-    insights = campaign.get_insights(params={
+    account = AdAccount(AD_ACCOUNT_ID)
+    insights = account.get_insights(params={
         "time_range": {"since": str(start), "until": str(end)},
         "fields": [
-            "campaign_name",
-            "spend",
-            "impressions",
-            "clicks",
-            "ctr",
-            "cpm",
-            "actions",
-            "cost_per_action_type",
+            "spend", "impressions", "clicks", "ctr", "cpm",
+            "actions", "cost_per_action_type",
         ],
-        "level": "campaign",
+        "level": "account",
     })
 
     rows = list(insights)
@@ -82,92 +94,67 @@ def fetch_campaign_insights(campaign_id: str, days: int = 1) -> dict:
 
     row = dict(rows[0])
 
-    # Extract app installs from actions list
-    installs = 0
-    cpi = 0.0
+    conversions = 0
+    cpa = 0.0
     for action in row.get("actions", []):
-        if action.get("action_type") in ("mobile_app_install", "app_install"):
-            installs = int(action.get("value", 0))
-
-    for cpa in row.get("cost_per_action_type", []):
-        if cpa.get("action_type") in ("mobile_app_install", "app_install"):
-            cpi = float(cpa.get("value", 0))
+        if action.get("action_type") in (
+            "lead", "offsite_conversion.fb_pixel_purchase",
+            "mobile_app_install", "app_install", "complete_registration",
+        ):
+            conversions += int(action.get("value", 0))
+    for cost in row.get("cost_per_action_type", []):
+        if cost.get("action_type") in (
+            "lead", "offsite_conversion.fb_pixel_purchase",
+            "mobile_app_install", "app_install", "complete_registration",
+        ):
+            cpa = float(cost.get("value", 0))
 
     spend = float(row.get("spend", 0))
-    impressions = int(row.get("impressions", 0))
-    clicks = int(row.get("clicks", 0))
-    ctr = float(row.get("ctr", 0))
-    cpm = float(row.get("cpm", 0))
 
     return {
-        "campaign_name": row.get("campaign_name", ""),
         "spend": spend,
-        "impressions": impressions,
-        "clicks": clicks,
-        "ctr": ctr,
-        "cpm": cpm,
-        "installs": installs,
-        "cpi": cpi,
+        "impressions": int(row.get("impressions", 0)),
+        "clicks": int(row.get("clicks", 0)),
+        "ctr": float(row.get("ctr", 0)),
+        "cpm": float(row.get("cpm", 0)),
+        "conversions": conversions,
+        "cpa": cpa,
         "days": days,
         "start": str(start),
         "end": str(end),
     }
 
 
-def fetch_all_campaigns_summary() -> list:
-    _init_meta()
-    account = AdAccount(AD_ACCOUNT_ID)
-    campaigns = account.get_campaigns(fields=["name", "status", "objective"])
-    result = []
-    for c in campaigns:
-        d = dict(c)
-        if d.get("status") == "ACTIVE":
-            result.append(d)
-    return result
-
-
-# ── Report formatting ─────────────────────────────────────────────────────
-
 def format_report(stats: dict) -> str:
     if not stats:
-        return "📊 No data yet — campaign may still be in review or hasn't spent yet."
+        return f"No data yet for {_BIZ_NAME}."
 
     days_label = "Today" if stats["days"] == 1 else f"Last {stats['days']} days"
-    ctr_fmt    = f"{stats['ctr']:.2f}%"
-    cpi_fmt    = f"₪{stats['cpi']:.2f}" if stats["cpi"] else "—"
-    spend_fmt  = f"₪{stats['spend']:.2f}"
-    cpm_fmt    = f"₪{stats['cpm']:.2f}"
 
     lines = [
-        f"📊 *Echoes Ads Report — {days_label}*",
-        f"_{stats['start']} → {stats['end']}_\n",
-        f"💰 Spend:       {spend_fmt}",
-        f"👁 Impressions: {stats['impressions']:,}",
-        f"🖱 Clicks:      {stats['clicks']:,}  ({ctr_fmt} CTR)",
-        f"📱 Installs:    {stats['installs']}",
-        f"💸 Cost/Install:{cpi_fmt}",
-        f"📡 CPM:         {cpm_fmt}",
+        f"*{_BIZ_NAME} — {days_label}*",
+        f"_{stats['start']} to {stats['end']}_\n",
+        f"Spend: {_SYM}{stats['spend']:.2f}",
+        f"Impressions: {stats['impressions']:,}",
+        f"Clicks: {stats['clicks']:,} ({stats['ctr']:.2f}% CTR)",
+        f"Conversions: {stats['conversions']}",
+        f"CPA: {_SYM}{stats['cpa']:.2f}" if stats["cpa"] > 0 else "CPA: --",
     ]
 
-    # Simple performance signal
-    if stats["installs"] > 0 and stats["cpi"] > 0:
-        if stats["cpi"] < 15:
-            lines.append("\n✅ CPI looks good — keep scaling.")
-        elif stats["cpi"] < 30:
-            lines.append("\n⚠️ CPI is moderate — monitor closely.")
+    if stats["conversions"] > 0 and stats["cpa"] > 0:
+        if stats["cpa"] <= _TARGET_CPL:
+            lines.append(f"\nBelow target ({_SYM}{_TARGET_CPL}) — looking good.")
         else:
-            lines.append("\n🔴 CPI is high — consider pausing weak ad.")
-    elif stats["spend"] > 5 and stats["installs"] == 0:
-        lines.append("\n⚠️ Spend but no installs yet — may still be in learning phase.")
+            lines.append(f"\nAbove target ({_SYM}{_TARGET_CPL}) — monitor closely.")
 
     return "\n".join(lines)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────
+# -- Entry point -----------------------------------------------------------
 
 def run(days: int = 1):
     logging.basicConfig(level=logging.WARNING)
-    stats = fetch_campaign_insights(APP_INSTALLS_CAMPAIGN, days=days)
+    stats = fetch_campaign_insights(days=days)
     report = format_report(stats)
     ok = send_telegram(report)
     if ok:
