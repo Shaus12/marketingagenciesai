@@ -5,6 +5,7 @@ Provides campaign-, ad-set-, and ad-level insights as well as creative
 metadata.  All methods return plain dicts / lists so downstream code
 (rules engine, reports, pandas analysis) never touches SDK objects.
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone

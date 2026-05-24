@@ -9,7 +9,7 @@ Uses the Advantage+ (unified) campaign structure where applicable
 """
 
 import logging
-from typing import Any
+from typing import Any, List, Optional
 
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.campaign import Campaign
@@ -33,7 +33,7 @@ def create_campaign(
     objective: str,
     budget: float,
     status: str = "PAUSED",
-    special_ad_categories: list[str] | None = None,
+    special_ad_categories: Optional[List[str]] = None,
     buying_type: str = "AUCTION",
 ) -> dict[str, Any]:
     """Create a new campaign (defaults to PAUSED for safety).
@@ -103,7 +103,7 @@ def create_campaign(
 
 
 def list_campaigns(
-    status_filter: list[str] | None = None,
+    status_filter: Optional[List[str]] = None,
 ) -> list[dict[str, Any]]:
     """List all campaigns in the account.
 
@@ -231,8 +231,8 @@ def create_adset(
     optimization_goal: str,
     billing_event: str = "IMPRESSIONS",
     status: str = "PAUSED",
-    start_time: str | None = None,
-    end_time: str | None = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
     bid_strategy: str = "LOWEST_COST_WITHOUT_CAP",
 ) -> dict[str, Any]:
     """Create an ad set within a campaign.
@@ -318,8 +318,8 @@ def create_adset(
 
 
 def list_adsets(
-    campaign_id: str | None = None,
-    status_filter: list[str] | None = None,
+    campaign_id: Optional[str] = None,
+    status_filter: Optional[List[str]] = None,
 ) -> list[dict[str, Any]]:
     """List ad sets, optionally filtered by campaign and/or status.
 
@@ -439,8 +439,8 @@ def create_ad(
 
 
 def list_ads(
-    adset_id: str | None = None,
-    status_filter: list[str] | None = None,
+    adset_id: Optional[str] = None,
+    status_filter: Optional[List[str]] = None,
 ) -> list[dict[str, Any]]:
     """List ads, optionally filtered by ad set and/or status.
 

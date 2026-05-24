@@ -1,0 +1,106 @@
+business:
+  name: echoes
+  website: https://echoes-numerology.vercel.app
+  industry: other
+  description: astrology maps
+funnel:
+  type: direct_sale
+  landing_page_url: ''
+  cta_text: Sign Up
+  cta_type: SHOP_NOW
+  offer_name: ''
+  offer_price: Free
+  never_show:
+  - product prices
+  - checkout links
+audience:
+  segments:
+  - name: Primary
+    percentage: 60
+    age_min: 25
+    age_max: 45
+    description: Main target audience
+  - name: Secondary
+    percentage: 30
+    age_min: 28
+    age_max: 50
+    description: Secondary audience
+  - name: Tertiary
+    percentage: 10
+    age_min: 22
+    age_max: 40
+    description: Exploratory audience
+  countries:
+  - US
+  - GB
+  excluded_countries: []
+  placements:
+  - feeds
+  languages:
+  - en
+targets:
+  cpl: 5.0
+  cpa: 50.0
+  target_roas: 4.0
+  ctr_min: 1.5
+  monthly_budget: 2000
+  daily_budget_cap: 120
+  currency: USD
+budget_split:
+  scale: 70
+  iterate: 20
+  test: 10
+brand:
+  voice: direct
+  tone_keywords:
+  - confident
+  - no-fluff
+  - results-driven
+  colors:
+    background: '#0a0a0a'
+    accent: '#c8ff00'
+    text: '#ffffff'
+    muted: '#888888'
+  font_style: bold sans-serif
+  visual_feel: dark, premium, techy, direct
+  creative_restrictions:
+  - no stock photos
+  - no illustrations of people
+  - no income guarantees
+ad_angles:
+- name: The Stat
+  hook: 90% of people never make money from X
+  why_it_works: Curiosity gap
+- name: The Math
+  hook: 3 clients x $500/mo = $1,500 recurring
+  why_it_works: Makes opportunity concrete
+- name: The Testimonial
+  hook: Real customer quote
+  why_it_works: Social proof
+- name: The Contrarian
+  hook: Stop doing X. Start doing Y.
+  why_it_works: Pattern interrupt
+proof_points:
+- $XXX+ revenue
+- XX customers served
+- X years in business
+campaigns:
+  scale: ''
+  iterate: ''
+  test: ''
+  retarget: ''
+adsets:
+  scale_main: ''
+  test_main: ''
+  retarget_website: ''
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ''
+    chat_id: ''
+  slack:
+    enabled: false
+    webhook_url: ''
+  email:
+    enabled: false
+    to: ''

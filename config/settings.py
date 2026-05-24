@@ -1,15 +1,34 @@
 """
 Core settings for the Meta Ads Management System.
-All values are loaded from .env or can be overridden here.
+
+Loads from two sources (in priority order):
+  1. client_config.yaml — business/funnel/target configuration
+  2. .env — API keys and credentials (never committed)
 """
 
 import os
+from pathlib import Path
+
+import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- Load client config if it exists ---
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_CONFIG_PATH = _PROJECT_ROOT / "client_config.yaml"
+_CLIENT_CONFIG: dict = {}
 
-# --- Meta Marketing API ---
+if _CONFIG_PATH.exists():
+    _CLIENT_CONFIG = yaml.safe_load(_CONFIG_PATH.read_text()) or {}
+
+
+def _cfg(section: str, key: str, default=""):
+    """Read a value from client_config.yaml nested sections."""
+    return _CLIENT_CONFIG.get(section, {}).get(key, default)
+
+
+# --- Meta Marketing API (always from .env) ---
 META_APP_ID = os.getenv("META_APP_ID", "")
 META_APP_SECRET = os.getenv("META_APP_SECRET", "")
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
@@ -24,40 +43,53 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 # --- Kie.ai ---
 KIE_AI_API_KEY = os.getenv("KIE_AI_API_KEY", "")
 
-# --- Telegram ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# --- Telegram (config yaml > .env) ---
+TELEGRAM_BOT_TOKEN = (
+    _cfg("notifications", "telegram") and _CLIENT_CONFIG.get("notifications", {}).get("telegram", {}).get("bot_token")
+) or os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = (
+    _cfg("notifications", "telegram") and _CLIENT_CONFIG.get("notifications", {}).get("telegram", {}).get("chat_id")
+) or os.getenv("TELEGRAM_CHAT_ID", "")
 
 # --- Echoes App ---
 ECHOES_FB_APP_ID = os.getenv("ECHOES_FB_APP_ID", "")
 
 # --- Slack ---
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+SLACK_WEBHOOK_URL = (
+    _CLIENT_CONFIG.get("notifications", {}).get("slack", {}).get("webhook_url")
+) or os.getenv("SLACK_WEBHOOK_URL", "")
 
 # --- Email ---
 EMAIL_SMTP_HOST = os.getenv("EMAIL_SMTP_HOST", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
 EMAIL_FROM = os.getenv("EMAIL_FROM", "")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
-EMAIL_TO = os.getenv("EMAIL_TO", "")
+EMAIL_TO = (
+    _CLIENT_CONFIG.get("notifications", {}).get("email", {}).get("to")
+) or os.getenv("EMAIL_TO", "")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
 # --- Database ---
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ads.db")
 
-# --- Business Targets (FILL THESE IN) ---
-# YourBrand.ai — AI product building platform
-# Products: Free Webinar → Box (€297) → Pro Program (€497-997) → 1-on-1 (€2K-5K)
-TARGET_CPA = float(os.getenv("TARGET_CPA", "50.0"))        # Max cost per acquisition (Pro sale)
-TARGET_CPL = float(os.getenv("TARGET_CPL", "5.0"))          # Max cost per webinar lead
-TARGET_ROAS = float(os.getenv("TARGET_ROAS", "4.0"))        # Minimum acceptable ROAS
-MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET", "2000"))  # Starting monthly ad spend
-CURRENCY = os.getenv("CURRENCY", "EUR")
+# --- Business Targets (client_config.yaml > .env > defaults) ---
+TARGET_CPA = float(_cfg("targets", "cpa", 0) or os.getenv("TARGET_CPA", "50.0"))
+TARGET_CPL = float(_cfg("targets", "cpl", 0) or os.getenv("TARGET_CPL", "5.0"))
+TARGET_ROAS = float(_cfg("targets", "target_roas", 0) or os.getenv("TARGET_ROAS", "4.0"))
+MONTHLY_BUDGET = float(_cfg("targets", "monthly_budget", 0) or os.getenv("MONTHLY_BUDGET", "2000"))
+CURRENCY = _cfg("targets", "currency", "") or os.getenv("CURRENCY", "USD")
+DAILY_BUDGET_CAP = float(_cfg("targets", "daily_budget_cap", 0) or os.getenv("DAILY_BUDGET_CAP", "120"))
 
-# --- Budget Allocation (Hormozi 70/20/10) ---
-SCALE_BUDGET_PCT = 0.70    # Proven winners
-ITERATE_BUDGET_PCT = 0.20  # Adjacent variations
-TEST_BUDGET_PCT = 0.10     # Wild new concepts
+# --- Budget Allocation (client_config.yaml > defaults) ---
+_budget_split = _CLIENT_CONFIG.get("budget_split", {})
+SCALE_BUDGET_PCT = (_budget_split.get("scale", 70) or 70) / 100
+ITERATE_BUDGET_PCT = (_budget_split.get("iterate", 20) or 20) / 100
+TEST_BUDGET_PCT = (_budget_split.get("test", 10) or 10) / 100
+
+# --- Business Info (from client config) ---
+BUSINESS_NAME = _cfg("business", "name", "")
+LANDING_PAGE_URL = _cfg("funnel", "landing_page_url", "")
+CTA_TYPE = _cfg("funnel", "cta_type", "SIGN_UP")
 
 # --- Supabase Table Mapping (YourBrand) ---
 SUPABASE_TABLES = {

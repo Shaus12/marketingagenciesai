@@ -68,8 +68,8 @@ def _step_pull_data(dry_run: bool = False) -> Dict[str, Any]:
 
     try:
         from api.insights_fetcher import fetch_ad_insights
-        from data.db import save_insights, init_db
-        from data.models import AdInsight
+        from data.db import save_insights, save_campaign, save_adset, save_ad, init_db
+        from data.models import AdInsight, CampaignData, AdSetData, AdData
 
         init_db()
 
@@ -77,6 +77,36 @@ def _step_pull_data(dry_run: bool = False) -> Dict[str, Any]:
         end = _yesterday()
 
         raw_rows = fetch_ad_insights(start, end)
+
+        # Upsert campaigns, adsets, and ads so FK constraints are satisfied
+        seen_campaigns: set = set()
+        seen_adsets: set = set()
+        seen_ads: set = set()
+        for row in raw_rows:
+            cid = row.get("campaign_id", "")
+            aid_set = row.get("adset_id", "")
+            aid = row.get("ad_id", "")
+            if cid and cid not in seen_campaigns:
+                save_campaign(CampaignData(
+                    campaign_id=cid,
+                    name=row.get("campaign_name", cid),
+                ))
+                seen_campaigns.add(cid)
+            if aid_set and aid_set not in seen_adsets:
+                save_adset(AdSetData(
+                    adset_id=aid_set,
+                    campaign_id=cid,
+                    name=row.get("adset_name", aid_set),
+                ))
+                seen_adsets.add(aid_set)
+            if aid and aid not in seen_ads:
+                save_ad(AdData(
+                    ad_id=aid,
+                    adset_id=aid_set,
+                    campaign_id=cid,
+                    name=row.get("ad_name", aid),
+                ))
+                seen_ads.add(aid)
 
         insights = []
         for row in raw_rows:
