@@ -356,17 +356,21 @@ def page_setup():
 
         st.info(
             "**How to get these credentials:**\n\n"
-            "1. Go to **developers.facebook.com** and create an app (Business type)\n"
+            "1. Go to **developers.facebook.com** → My Apps → Create App (Business type)\n"
             "2. Add the **Marketing API** product\n"
-            "3. Go to **Tools > Graph API Explorer**\n"
-            "4. Select your app, generate an Access Token with permissions: `ads_management`, `ads_read`\n"
-            "5. Find your Ad Account ID in the Ads Manager URL: `act_XXXXXXXXX`\n\n"
-            "Your credentials are stored locally in `.env` and never shared."
+            "3. Go to **Settings → Basic** to find your **App ID** and **App Secret**\n"
+            "4. Go to **Tools → Graph API Explorer**, select your app\n"
+            "5. Generate an Access Token with permissions: `ads_management`, `ads_read`\n"
+            "6. Find your Ad Account ID in the Ads Manager URL: `act_XXXXXXXXX`\n\n"
+            "All credentials are stored locally in `.env` and never shared."
         )
 
         current_token = read_env_value("META_ACCESS_TOKEN")
         current_account = read_env_value("META_AD_ACCOUNT_ID")
+        current_app_id = read_env_value("META_APP_ID")
+        current_app_secret = read_env_value("META_APP_SECRET")
 
+        st.markdown("##### Required")
         meta_token = st.text_input(
             "Access Token",
             value=current_token if current_token != "your_access_token" else "",
@@ -379,15 +383,35 @@ def page_setup():
             placeholder="act_123456789",
         )
 
+        st.markdown("##### App Credentials (required by most Meta apps)")
+        col_app1, col_app2 = st.columns(2)
+        with col_app1:
+            meta_app_id = st.text_input(
+                "App ID",
+                value=current_app_id if current_app_id != "your_app_id" else "",
+                placeholder="Settings → Basic → App ID",
+            )
+        with col_app2:
+            meta_app_secret = st.text_input(
+                "App Secret",
+                value=current_app_secret if current_app_secret != "your_app_secret" else "",
+                type="password",
+                placeholder="Settings → Basic → App Secret",
+            )
+
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Save Credentials", type="primary", key="save_meta"):
                 if meta_token and meta_account:
                     update_env_value("META_ACCESS_TOKEN", meta_token)
                     update_env_value("META_AD_ACCOUNT_ID", meta_account)
+                    if meta_app_id:
+                        update_env_value("META_APP_ID", meta_app_id)
+                    if meta_app_secret:
+                        update_env_value("META_APP_SECRET", meta_app_secret)
                     st.success("Credentials saved!")
                 else:
-                    st.warning("Please fill in both fields.")
+                    st.warning("Access Token and Ad Account ID are required.")
         with col2:
             if st.button("Test Connection", key="test_meta"):
                 if meta_token and meta_account:
