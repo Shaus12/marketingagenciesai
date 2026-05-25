@@ -1,8 +1,8 @@
 business:
-  name: echoes
-  website: https://echoes-numerology.vercel.app
-  industry: other
-  description: astrology maps
+  name: theway2digital
+  website: ''
+  industry: marketing
+  description: digital marketing agency
 funnel:
   type: direct_sale
   landing_page_url: ''
@@ -45,7 +45,7 @@ targets:
   ctr_min: 1.5
   monthly_budget: 2000
   daily_budget_cap: 120
-  currency: USD
+  currency: ILS
 budget_split:
   scale: 70
   iterate: 20

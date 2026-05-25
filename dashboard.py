@@ -369,6 +369,7 @@ def page_setup():
         current_account = read_env_value("META_AD_ACCOUNT_ID")
         current_app_id = read_env_value("META_APP_ID")
         current_app_secret = read_env_value("META_APP_SECRET")
+        current_page_id = read_env_value("META_PAGE_ID")
 
         st.markdown("##### Required")
         meta_token = st.text_input(
@@ -399,6 +400,14 @@ def page_setup():
                 placeholder="Settings → Basic → App Secret",
             )
 
+        st.markdown("##### Facebook Page (needed for creating/publishing ads)")
+        meta_page_id = st.text_input(
+            "Page ID",
+            value=current_page_id if current_page_id not in ("", None, "your_page_id") else "",
+            placeholder="Your Facebook Page ID (from Page → About → Page ID)",
+            help="Required only when creating ads. Find it at your Facebook Page → About → Page ID.",
+        )
+
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Save Credentials", type="primary", key="save_meta"):
@@ -409,6 +418,8 @@ def page_setup():
                         update_env_value("META_APP_ID", meta_app_id)
                     if meta_app_secret:
                         update_env_value("META_APP_SECRET", meta_app_secret)
+                    if meta_page_id:
+                        update_env_value("META_PAGE_ID", meta_page_id)
                     st.success("Credentials saved!")
                 else:
                     st.warning("Access Token and Ad Account ID are required.")

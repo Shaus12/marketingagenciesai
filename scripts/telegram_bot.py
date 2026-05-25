@@ -2,18 +2,13 @@
 Telegram bot for managing Meta Ads — powered by Claude.
 
 Chat naturally, ask about performance, and control campaigns from Telegram.
-
-Built-in commands:
-  /stats    — today's campaign stats
-  /week     — last 7 days summary
-  /pause    — pause all active campaigns
-  /activate — activate campaigns
-  /help     — show available commands
+The AI understands intent — just say "show me stats" or "switch to account X".
 
 Usage:
     python -m scripts.telegram_bot
 """
 
+import json
 import logging
 import os
 import sys
@@ -32,16 +27,14 @@ from facebook_business.exceptions import FacebookRequestError
 
 logger = logging.getLogger(__name__)
 
-# -- Config (all from environment / client_config.yaml) --------------------
+# -- Config ----------------------------------------------------------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
-KIE_API_KEY = os.getenv("KIE_AI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID", "")
 
 
 def _load_client_config() -> dict:
-    """Load client_config.yaml for business context."""
     try:
         import yaml
         from pathlib import Path
@@ -63,6 +56,44 @@ _TARGET_ROAS = _CLIENT_CONFIG.get("targets", {}).get("target_roas", 4.0)
 _FUNNEL_TYPE = _CLIENT_CONFIG.get("funnel", {}).get("type", "")
 _LANDING_URL = _CLIENT_CONFIG.get("funnel", {}).get("landing_page_url", "")
 
+
+# -- Available tools for Claude --------------------------------------------
+
+TOOLS_DESCRIPTION = """You have access to these tools. When the user's message matches one, respond ONLY with the exact JSON action. No extra text.
+
+TOOLS:
+1. get_all_stats - Show performance across ALL ad accounts (default when user asks generally)
+   Trigger: user asks for stats, performance, results, "how are my ads", "מה התוצאות", weekly/daily results — unless they specify a single account
+   Response: {"action": "all_stats", "days": 1}  (use days=7 for weekly)
+
+2. get_stats - Show today's performance for the CURRENT account only
+   Trigger: user specifically asks about the current account, or says "this account"
+   Response: {"action": "stats"}
+
+3. get_week - Show last 7 days for the CURRENT account only
+   Trigger: user specifically asks about this account's weekly stats
+   Response: {"action": "week"}
+
+4. list_accounts - Show all ad accounts with buttons to switch
+   Trigger: user asks to see accounts, switch account, change account, list accounts
+   Response: {"action": "accounts"}
+
+5. switch_account - Switch to a specific ad account
+   Trigger: user says "switch to act_XXX" or mentions a specific account ID
+   Response: {"action": "switch", "account_id": "act_XXXXXXXX"}
+
+6. pause_campaigns - Pause all active campaigns
+   Trigger: user asks to pause, stop, turn off campaigns
+   Response: {"action": "pause"}
+
+7. activate_campaigns - Activate paused campaigns
+   Trigger: user asks to activate, turn on, resume, start campaigns
+   Response: {"action": "activate"}
+
+IMPORTANT: When the user asks generally about results/performance (e.g. "מה התוצאות שלי" / "how are campaigns doing" / "show me results"), ALWAYS use all_stats to show ALL accounts. Only use stats/week when they explicitly ask about a single/current account.
+
+If the user's message does NOT match any tool, respond normally as a helpful ads assistant. Do NOT output JSON in that case — just reply in plain text."""
+
 SYSTEM_PROMPT = f"""You are an AI ads assistant managing Meta (Facebook/Instagram) campaigns for "{_BIZ_NAME}".
 
 You help the user monitor performance, understand metrics, and make decisions about their ad campaigns. Be concise, direct, and use plain language.
@@ -75,18 +106,33 @@ Key facts:
 - Target ROAS: {_TARGET_ROAS}x
 - Funnel: {_FUNNEL_TYPE}
 - Landing page: {_LANDING_URL}
+- Current ad account: {AD_ACCOUNT_ID}
 
-When asked about metrics, remind the user they can type /stats for live numbers.
-When asked to pause or activate, remind them they can use /pause or /activate commands.
-Keep answers under 200 words unless the user asks for detail."""
+Keep answers under 200 words unless the user asks for detail.
+
+{TOOLS_DESCRIPTION}"""
 
 
 # -- Telegram helpers ------------------------------------------------------
 
-def send(chat_id: str, text: str) -> None:
+def send(chat_id: str, text: str, reply_markup: dict = None) -> None:
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json=payload,
+            timeout=10,
+        )
+    except Exception as e:
+        logger.error("Failed to send message: %s", e)
+
+
+def answer_callback(callback_query_id: str, text: str = "") -> None:
     requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+        json={"callback_query_id": callback_query_id, "text": text},
         timeout=10,
     )
 
@@ -95,7 +141,8 @@ def get_updates(offset: int) -> list:
     try:
         r = requests.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-            params={"offset": offset, "timeout": 30, "limit": 10},
+            params={"offset": offset, "timeout": 30, "limit": 10,
+                    "allowed_updates": json.dumps(["message", "callback_query"])},
             timeout=35,
         )
         return r.json().get("result", [])
@@ -113,23 +160,23 @@ def _init_meta():
     )
 
 
-def _get_active_campaigns() -> list:
-    """Get all active campaigns from the ad account."""
-    _init_meta()
-    account = AdAccount(AD_ACCOUNT_ID)
-    campaigns = account.get_campaigns(
-        fields=["id", "name", "status", "daily_budget"],
-        params={"effective_status": ["ACTIVE"]},
-    )
-    return [dict(c) for c in campaigns]
+def _get_account_name() -> str:
+    """Get the current ad account's name."""
+    try:
+        _init_meta()
+        account = AdAccount(AD_ACCOUNT_ID)
+        info = account.api_get(fields=["name"])
+        return info.get("name", AD_ACCOUNT_ID)
+    except Exception:
+        return AD_ACCOUNT_ID
 
 
 def get_today_stats() -> str:
-    """Fetch today's stats for all active campaigns."""
     _init_meta()
-    from datetime import date, timedelta
+    from datetime import date
     account = AdAccount(AD_ACCOUNT_ID)
     today = date.today()
+    acc_name = _get_account_name()
 
     try:
         insights = account.get_insights(params={
@@ -142,7 +189,7 @@ def get_today_stats() -> str:
         })
         rows = list(insights)
         if not rows:
-            return f"No data yet today for {_BIZ_NAME}."
+            return f"No data yet today for *{acc_name}* (`{AD_ACCOUNT_ID}`)."
 
         row = dict(rows[0])
         spend = float(row.get("spend", 0))
@@ -150,7 +197,6 @@ def get_today_stats() -> str:
         clicks = int(row.get("clicks", 0))
         ctr = float(row.get("ctr", 0))
 
-        # Extract conversions
         conversions = 0
         cpa = 0.0
         for action in row.get("actions", []):
@@ -161,7 +207,8 @@ def get_today_stats() -> str:
                 cpa = float(cost.get("value", 0))
 
         lines = [
-            f"*{_BIZ_NAME} — Today*",
+            f"*{acc_name} — Today*",
+            f"_Account: {AD_ACCOUNT_ID}_",
             f"_{today}_\n",
             f"Spend: {_CURRENCY_SYM}{spend:.2f}",
             f"Impressions: {impressions:,}",
@@ -182,12 +229,12 @@ def get_today_stats() -> str:
 
 
 def get_week_stats() -> str:
-    """Fetch last 7 days stats."""
     _init_meta()
     from datetime import date, timedelta
     account = AdAccount(AD_ACCOUNT_ID)
     end = date.today()
     start = end - timedelta(days=6)
+    acc_name = _get_account_name()
 
     try:
         insights = account.get_insights(params={
@@ -200,7 +247,7 @@ def get_week_stats() -> str:
         })
         rows = list(insights)
         if not rows:
-            return "No data for the last 7 days."
+            return f"No data for the last 7 days for *{acc_name}*."
 
         row = dict(rows[0])
         spend = float(row.get("spend", 0))
@@ -217,7 +264,8 @@ def get_week_stats() -> str:
             cpa = spend / conversions
 
         lines = [
-            f"*{_BIZ_NAME} — Last 7 Days*",
+            f"*{acc_name} — Last 7 Days*",
+            f"_Account: {AD_ACCOUNT_ID}_",
             f"_{start} to {end}_\n",
             f"Spend: {_CURRENCY_SYM}{spend:.2f}",
             f"Impressions: {impressions:,}",
@@ -232,7 +280,6 @@ def get_week_stats() -> str:
 
 
 def set_campaign_status(status: str) -> str:
-    """Pause or activate ALL campaigns in the account."""
     _init_meta()
     try:
         account = AdAccount(AD_ACCOUNT_ID)
@@ -261,50 +308,204 @@ def set_campaign_status(status: str) -> str:
         return f"Error: {e}"
 
 
-# -- AI chat (Claude via Anthropic or Kie.ai) ------------------------------
+def get_all_accounts_stats(days: int = 1) -> str:
+    """Fetch stats across ALL accessible ad accounts."""
+    _init_meta()
+    from datetime import date, timedelta
+    token = os.getenv("META_ACCESS_TOKEN", "")
+
+    # Get all accounts
+    r = requests.get(
+        "https://graph.facebook.com/v21.0/me/adaccounts",
+        params={"access_token": token, "fields": "id,name,account_status", "limit": 50},
+        timeout=10,
+    )
+    accounts = [a for a in r.json().get("data", []) if a.get("account_status") == 1]
+
+    if not accounts:
+        return "No active ad accounts found."
+
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    period = "Today" if days == 1 else f"Last {days} days"
+
+    lines = [f"*{_BIZ_NAME} — {period}*", f"_{start} to {end}_\n"]
+    total_spend = 0.0
+    total_conversions = 0
+    total_clicks = 0
+    accounts_with_data = 0
+
+    for acc in accounts:
+        acc_id = acc["id"]
+        acc_name = acc.get("name", acc_id)
+        try:
+            account = AdAccount(acc_id)
+            insights = account.get_insights(params={
+                "time_range": {"since": str(start), "until": str(end)},
+                "fields": ["spend", "impressions", "clicks", "ctr", "actions", "cost_per_action_type"],
+                "level": "account",
+            })
+            rows = list(insights)
+            if not rows:
+                continue
+
+            accounts_with_data += 1
+            row = dict(rows[0])
+            spend = float(row.get("spend", 0))
+            impressions = int(row.get("impressions", 0))
+            clicks = int(row.get("clicks", 0))
+            ctr = float(row.get("ctr", 0))
+
+            conversions = 0
+            cpa = 0.0
+            for action in row.get("actions", []):
+                if action.get("action_type") in ("lead", "offsite_conversion.fb_pixel_purchase", "mobile_app_install", "app_install", "complete_registration", "offsite_conversion.fb_pixel_lead"):
+                    conversions += int(action.get("value", 0))
+            if conversions > 0 and spend > 0:
+                cpa = spend / conversions
+
+            total_spend += spend
+            total_conversions += conversions
+            total_clicks += clicks
+
+            # Performance verdict
+            verdict = ""
+            if conversions > 0 and cpa > 0:
+                if cpa <= _TARGET_CPL:
+                    verdict = " ✅"
+                else:
+                    verdict = " ⚠️"
+
+            lines.append(f"*{acc_name}*{verdict}")
+            lines.append(f"  Spend: {_CURRENCY_SYM}{spend:.2f} | Clicks: {clicks:,} ({ctr:.2f}% CTR)")
+            conv_text = f"  Conversions: {conversions}"
+            if cpa > 0:
+                conv_text += f" | CPA: {_CURRENCY_SYM}{cpa:.2f}"
+            lines.append(conv_text)
+            lines.append("")
+
+        except Exception as e:
+            logger.warning("Skipping %s: %s", acc_id, str(e)[:50])
+            continue
+
+    if accounts_with_data == 0:
+        return f"No data for any account ({period})."
+
+    # Summary
+    lines.append("---")
+    lines.append(f"*Total across {accounts_with_data} accounts:*")
+    lines.append(f"  Spend: {_CURRENCY_SYM}{total_spend:.2f}")
+    lines.append(f"  Clicks: {total_clicks:,}")
+    lines.append(f"  Conversions: {total_conversions}")
+    if total_conversions > 0:
+        avg_cpa = total_spend / total_conversions
+        lines.append(f"  Avg CPA: {_CURRENCY_SYM}{avg_cpa:.2f}")
+        if avg_cpa <= _TARGET_CPL:
+            lines.append(f"\n✅ Overall below target ({_CURRENCY_SYM}{_TARGET_CPL})")
+        else:
+            lines.append(f"\n⚠️ Overall above target ({_CURRENCY_SYM}{_TARGET_CPL})")
+
+    return "\n".join(lines)
+
+
+def list_accounts_with_buttons(chat_id: str) -> None:
+    """List all ad accounts as inline buttons."""
+    _init_meta()
+    token = os.getenv("META_ACCESS_TOKEN", "")
+    r = requests.get(
+        "https://graph.facebook.com/v21.0/me/adaccounts",
+        params={"access_token": token, "fields": "id,name,account_status", "limit": 50},
+        timeout=10,
+    )
+    data = r.json().get("data", [])
+    if not data:
+        send(chat_id, "No ad accounts found.")
+        return
+
+    status_map = {1: "Active", 2: "Disabled", 3: "Unsettled", 7: "Pending"}
+    buttons = []
+    for acc in data:
+        status = status_map.get(acc.get("account_status"), "?")
+        name = acc.get("name", acc["id"])
+        current = " [NOW]" if acc["id"] == AD_ACCOUNT_ID else ""
+        label = f"{name} ({status}){current}"
+        buttons.append([{"text": label, "callback_data": f"switch:{acc['id']}"}])
+
+    send(
+        chat_id,
+        f"*Select an ad account:*\n_Current: `{AD_ACCOUNT_ID}`_",
+        reply_markup={"inline_keyboard": buttons},
+    )
+
+
+def switch_account(new_account_id: str) -> str:
+    global AD_ACCOUNT_ID
+    new_account_id = new_account_id.strip()
+    if not new_account_id.startswith("act_"):
+        new_account_id = f"act_{new_account_id}"
+
+    AD_ACCOUNT_ID = new_account_id
+    os.environ["META_AD_ACCOUNT_ID"] = new_account_id
+
+    # Update .env file
+    env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+    try:
+        lines = open(env_path).readlines()
+        with open(env_path, "w") as f:
+            for line in lines:
+                if line.startswith("META_AD_ACCOUNT_ID="):
+                    f.write(f"META_AD_ACCOUNT_ID={new_account_id}\n")
+                else:
+                    f.write(line)
+    except Exception as e:
+        logger.error("Could not update .env: %s", e)
+
+    # Get new account name
+    acc_name = _get_account_name()
+    return f"Switched to *{acc_name}* (`{new_account_id}`)."
+
+
+# -- AI chat (Claude) -----------------------------------------------------
 
 _history: dict[str, list] = {}
 
 
-def ask_claude(chat_id: str, user_message: str) -> str:
+def ask_claude(chat_id: str, user_message: str) -> dict:
+    """Ask Claude — returns either a tool action dict or a text reply string."""
     if chat_id not in _history:
         _history[chat_id] = []
 
     _history[chat_id].append({"role": "user", "content": user_message})
     messages = _history[chat_id][-20:]
 
-    # Try Anthropic SDK first, then Kie.ai fallback
     try:
-        if ANTHROPIC_API_KEY:
-            import anthropic
-            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-            resp = client.messages.create(
-                model="claude-sonnet-4-5-20250514",
-                max_tokens=512,
-                system=SYSTEM_PROMPT,
-                messages=messages,
-            )
-            reply = resp.content[0].text
-        elif KIE_API_KEY:
-            r = requests.post(
-                "https://api.kie.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {KIE_API_KEY}", "content-type": "application/json"},
-                json={"model": "claude-sonnet-4-5", "max_tokens": 512,
-                      "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages},
-                timeout=30,
-            )
-            data = r.json()
-            if "choices" in data and data["choices"]:
-                reply = data["choices"][0].get("message", {}).get("content", "")
-            else:
-                reply = f"AI error: {data.get('error', {}).get('message', 'unknown')}"
-        else:
-            reply = "No AI API key configured. Set ANTHROPIC_API_KEY or KIE_AI_API_KEY in your .env file."
+        if not ANTHROPIC_API_KEY:
+            return {"text": "No ANTHROPIC_API_KEY configured in .env."}
 
+        import anthropic
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=512,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+        reply = resp.content[0].text
         _history[chat_id].append({"role": "assistant", "content": reply})
-        return reply
+
+        # Check if Claude returned a tool action
+        reply_stripped = reply.strip()
+        if reply_stripped.startswith("{") and reply_stripped.endswith("}"):
+            try:
+                action = json.loads(reply_stripped)
+                if "action" in action:
+                    return action
+            except json.JSONDecodeError:
+                pass
+
+        return {"text": reply}
     except Exception as e:
-        return f"AI error: {e}"
+        return {"text": f"AI error: {e}"}
 
 
 # -- Command handler ------------------------------------------------------
@@ -312,19 +513,29 @@ def ask_claude(chat_id: str, user_message: str) -> str:
 HELP_TEXT = f"""*{_BIZ_NAME} Ads Bot*
 
 *Commands:*
-/stats — today's performance
-/week — last 7 days
+/all — all accounts performance (today)
+/all7 — all accounts (last 7 days)
+/stats — current account today
+/week — current account last 7 days
 /activate — turn campaigns ON
 /pause — turn campaigns OFF
+/accounts — list & switch ad accounts
 /help — this message
 
-Or just *chat naturally* — ask me anything about your ads, results, or strategy."""
+Or just *chat naturally* — ask "מה התוצאות שלי?", "show me results", "switch account", etc."""
 
 
 def handle_message(chat_id: str, text: str) -> None:
     text = text.strip()
 
-    if text.startswith("/stats"):
+    # Slash commands
+    if text.startswith("/all7"):
+        send(chat_id, "Fetching all accounts (7 days)...")
+        send(chat_id, get_all_accounts_stats(days=7))
+    elif text.startswith("/all"):
+        send(chat_id, "Fetching all accounts...")
+        send(chat_id, get_all_accounts_stats(days=1))
+    elif text.startswith("/stats"):
         send(chat_id, get_today_stats())
     elif text.startswith("/week"):
         send(chat_id, get_week_stats())
@@ -332,11 +543,63 @@ def handle_message(chat_id: str, text: str) -> None:
         send(chat_id, set_campaign_status("ACTIVE"))
     elif text.startswith("/pause"):
         send(chat_id, set_campaign_status("PAUSED"))
+    elif text.startswith("/accounts"):
+        list_accounts_with_buttons(chat_id)
     elif text.startswith("/start") or text.startswith("/help"):
         send(chat_id, HELP_TEXT)
     else:
-        reply = ask_claude(chat_id, text)
-        send(chat_id, reply)
+        # Natural language — let Claude decide
+        result = ask_claude(chat_id, text)
+
+        if isinstance(result, dict) and "action" in result:
+            execute_action(chat_id, result)
+        else:
+            send(chat_id, result.get("text", str(result)))
+
+
+def execute_action(chat_id: str, action: dict) -> None:
+    """Execute a tool action returned by Claude."""
+    act = action.get("action")
+    if act == "all_stats":
+        days = action.get("days", 1)
+        send(chat_id, f"Fetching all accounts ({days} day{'s' if days > 1 else ''})...")
+        send(chat_id, get_all_accounts_stats(days=days))
+    elif act == "stats":
+        send(chat_id, get_today_stats())
+    elif act == "week":
+        send(chat_id, get_week_stats())
+    elif act == "accounts":
+        list_accounts_with_buttons(chat_id)
+    elif act == "switch":
+        account_id = action.get("account_id", "")
+        if account_id:
+            send(chat_id, switch_account(account_id))
+        else:
+            list_accounts_with_buttons(chat_id)
+    elif act == "pause":
+        send(chat_id, set_campaign_status("PAUSED"))
+    elif act == "activate":
+        send(chat_id, set_campaign_status("ACTIVE"))
+    else:
+        send(chat_id, "I didn't understand that action. Try /help.")
+
+
+def handle_callback(callback_query: dict) -> None:
+    """Handle inline button presses."""
+    cb_id = callback_query.get("id", "")
+    data = callback_query.get("data", "")
+    chat_id = str(callback_query.get("message", {}).get("chat", {}).get("id", ""))
+
+    if not chat_id:
+        return
+
+    if data.startswith("switch:"):
+        account_id = data.split(":", 1)[1]
+        result = switch_account(account_id)
+        answer_callback(cb_id, f"Switched to {account_id}")
+        send(chat_id, result)
+    else:
+        answer_callback(cb_id)
 
 
 # -- Main loop ------------------------------------------------------------
@@ -356,6 +619,13 @@ def run():
         updates = get_updates(offset)
         for update in updates:
             offset = update["update_id"] + 1
+
+            # Handle inline button callbacks
+            if "callback_query" in update:
+                handle_callback(update["callback_query"])
+                continue
+
+            # Handle text messages
             msg = update.get("message", {})
             chat_id = str(msg.get("chat", {}).get("id", ""))
             text = msg.get("text", "")
